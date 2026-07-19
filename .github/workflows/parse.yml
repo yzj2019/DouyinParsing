@@ -22,6 +22,8 @@ jobs:
         run: pip install requests
 
       - name: 启动本地 Douyin 解析 API (Docker)
+        env:
+          DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
         run: |
           # 拉起官方镜像（后台运行，端口 8080 -> 容器内 80）
           docker run -d \
@@ -37,12 +39,12 @@ jobs:
             && echo "已取得默认配置文件" \
             || echo "⚠️  未找到 config.yaml，跳过 Cookie 注入"
 
-          # 将 DOUYIN_COOKIE Secret 注入配置（兼容多种 YAML 结构）
-          if [ -f ./config.yaml ] && [ -n "${{ secrets.DOUYIN_COOKIE }}" ]; then
+          # 将 DOUYIN_COOKIE 注入配置（通过环境变量传入，避免特殊字符破坏语法）
+          if [ -f ./config.yaml ] && [ -n "$DOUYIN_COOKIE" ]; then
             python3 - <<'PYEOF'
-          import yaml, sys
+          import yaml, os
 
-          cookie = "${{ secrets.DOUYIN_COOKIE }}"
+          cookie = os.environ.get("DOUYIN_COOKIE", "")
           path = "./config.yaml"
 
           with open(path, "r", encoding="utf-8") as f:
@@ -74,6 +76,7 @@ jobs:
             echo "等待 API 就绪... (${i}/30)"
             sleep 2
           done
+
 
       - name: Run parser
         env:
