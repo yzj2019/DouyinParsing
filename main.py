@@ -142,5 +142,10 @@ if __name__ == "__main__":
         print(
             "========================================================\n"
         )
+        
+        # 将纯净版文案单独写入文件，方便外部流程（如 GitHub Action）直接读取提取
+        with open("transcript.txt", "w", encoding="utf-8") as f:
+            f.write(transcript)
+
     except Exception as err:
         print(f"\n❌ 运行出错: {err}")

@@ -27,13 +27,26 @@ jobs:
           SHARE_TEXT: "${{ github.event.issue.title }} ${{ github.event.issue.body }}"
         run: |
           echo "开始解析..."
-          # 运行解析并收集输出，失败也不终止工作流以便回传错误信息
-          python main.py "$SHARE_TEXT" > result.txt 2>&1 || true
+          # 运行解析并收集日志，失败也不终止工作流以便回传错误信息
+          python main.py "$SHARE_TEXT" > result_log.txt 2>&1 || true
           
-          # 将结果拼接为 Markdown，准备作为评论
-          echo '```text' > comment_body.md
-          cat result.txt >> comment_body.md
+          # 构建 Markdown 格式的回复内容
+          echo "<details><summary>点击查看运行日志</summary>" > comment_body.md
+          echo "" >> comment_body.md
+          echo '```text' >> comment_body.md
+          cat result_log.txt >> comment_body.md
           echo '```' >> comment_body.md
+          echo "</details>" >> comment_body.md
+          echo "" >> comment_body.md
+          
+          if [ -f transcript.txt ]; then
+            echo "**✅ 解析成功！视频文案：**" >> comment_body.md
+            echo '```text' >> comment_body.md
+            cat transcript.txt >> comment_body.md
+            echo '```' >> comment_body.md
+          else
+            echo "**❌ 解析失败，请展开上方日志查看原因。**" >> comment_body.md
+          fi
 
       - name: Comment on Issue
         env:
