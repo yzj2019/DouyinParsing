@@ -43,26 +43,37 @@ jobs:
             && echo "已取得默认配置文件" \
             || echo "⚠️  未找到 config.yaml，跳过 Cookie 注入"
 
-          # 将 DOUYIN_COOKIE 注入配置（通过环境变量传入，避免特殊字符破坏语法）
+          # 将 DOUYIN_COOKIE 注入配置（正则替换 Cookie 行，保留文件原有结构和注释）
           if [ -f ./config.yaml ] && [ -n "$DOUYIN_COOKIE" ]; then
             python3 - <<'PYEOF'
-          import yaml, os
+          import re, os
 
           cookie = os.environ.get("DOUYIN_COOKIE", "")
           path = "./config.yaml"
 
           with open(path, "r", encoding="utf-8") as f:
-              cfg = yaml.safe_load(f) or {}
+              content = f.read()
 
-          # 实际结构：TokenManager.douyin.headers.Cookie
-          cfg.setdefault("TokenManager", {}) \
-             .setdefault("douyin", {}) \
-             .setdefault("headers", {})["Cookie"] = cookie
+          # 仅替换 Cookie 行的值，保留缩进和其他所有内容
+          new_content, n = re.subn(
+              r'([ \t]+Cookie:[ \t]).*',
+              lambda m: m.group(1) + cookie,
+              content
+          )
+
+          if n == 0:
+              # 原文件没有 Cookie 行，追加到 headers 下
+              new_content = re.sub(
+                  r'([ \t]+Referer:[ \t].+)',
+                  r'\1\n      Cookie: ' + cookie,
+                  content
+              )
+              print("✅ Cookie 行不存在，已追加到 Referer 后")
+          else:
+              print(f"✅ Cookie 已注入（长度: {len(cookie)} 字符）")
 
           with open(path, "w", encoding="utf-8") as f:
-              yaml.dump(cfg, f, allow_unicode=True)
-
-          print("✅ Cookie 注入路径: TokenManager.douyin.headers.Cookie")
+              f.write(new_content)
           PYEOF
             # 将修改后的配置写回容器并重启
             docker cp ./config.yaml douyin_api:/app/crawlers/douyin/web/config.yaml
