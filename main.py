@@ -1,5 +1,7 @@
 import io
 import os
+import sys
+import re
 import requests
 
 # ==================== 配置区域 ====================
@@ -22,9 +24,13 @@ def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
     """
     print("1. 正在调用 douyin.wtf 混合解析接口...")
 
-    # 根据文档截图，设置请求参数
+    # 从分享文本中提取真正的 URL，防止多余的字符导致 API 400 错误
+    url_match = re.search(r'(https?://[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|])', share_text_or_url)
+    clean_url = url_match.group(1) if url_match else share_text_or_url
+
+    # 设置请求参数
     params = {
-        "url": share_text_or_url,
+        "url": clean_url,
         "minimal": "true",  # 开启精简模式，加快接口返回速度
     }
 
@@ -115,14 +121,16 @@ def transcribe_via_siliconflow(media_url: str, media_type: str) -> str:
 
 # ==================== 实际运行测试 ====================
 if __name__ == "__main__":
-    # 截图文档提示 url 支持“分享文本、短链或长链”
-    # 你可以直接把抖音里点击“复制链接”的那一整串文字贴进来，比如：
-    # "7.23 03/24 复制打开抖音，看看【xxxx的作品】... https://v.douyin.com/iLxxxxx/"
-    test_share_url = "https://v.douyin.com/jBMTBIxMpEU/"
+    # 优先使用命令行传入的分享文本或链接
+    if len(sys.argv) > 1:
+        share_text_or_url = " ".join(sys.argv[1:])
+    else:
+        # 默认测试链接
+        share_text_or_url = "https://v.douyin.com/jWOixl-zwTI/"
 
     try:
         # 1. 拿取媒体播放地址，以及对应是 mp3 还是 mp4
-        real_media_url, m_type = get_douyin_media_url(test_share_url)
+        real_media_url, m_type = get_douyin_media_url(share_text_or_url)
 
         # 2. 语音转文字
         transcript = transcribe_via_siliconflow(real_media_url, m_type)
