@@ -43,6 +43,7 @@ jobs:
             echo "**✅ 解析成功！视频文案：**" >> comment_body.md
             echo '```text' >> comment_body.md
             cat transcript.txt >> comment_body.md
+            echo "" >> comment_body.md
             echo '```' >> comment_body.md
           else
             echo "**❌ 解析失败，请展开上方日志查看原因。**" >> comment_body.md
