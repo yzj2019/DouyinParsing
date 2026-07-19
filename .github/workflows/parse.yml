@@ -1,0 +1,29 @@
+name: 抖音文案解析 (Douyin Parsing)
+
+on:
+  workflow_dispatch:
+    inputs:
+      share_text:
+        description: '请输入抖音分享文本或链接'
+        required: true
+        type: string
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run parser
+        env:
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+        run: python main.py "${{ github.event.inputs.share_text }}"
