@@ -25,14 +25,18 @@ jobs:
         env:
           DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
         run: |
-          # 拉起官方镜像（后台运行，端口 8080 -> 容器内 80）
+          # 使用 host 网络模式（与官方 docker-compose 一致，直接共享宿主机网络）
           docker run -d \
             --name douyin_api \
-            -p 8080:80 \
+            --network host \
             evil0ctal/douyin_tiktok_download_api:latest
 
-          # 等待容器初始化，再复制默认配置
+          # 等待容器初始化，同时观察日志确认监听端口
           sleep 10
+          echo "=== 容器启动日志 ==="
+          docker logs douyin_api 2>&1 | tail -30
+          echo "=== 容器暴露端口 ==="
+          docker inspect --format '{{json .Config.ExposedPorts}}' douyin_api
 
           # 从容器中取出默认 config.yaml
           docker cp douyin_api:/app/crawlers/douyin/web/config.yaml ./config.yaml 2>/dev/null \
@@ -67,21 +71,45 @@ jobs:
             sleep 5
           fi
 
-          # 轮询等待 API 健康（最多 60 秒）
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/docs > /dev/null 2>&1; then
-              echo "✅ Douyin API 已就绪 (第 ${i} 次检测)"
+          # 探测 API 实际监听端口（同时尝试 8000 和 80）
+          API_PORT=""
+          for port in 8000 80; do
+            if curl -sf --max-time 3 http://localhost:${port}/docs > /dev/null 2>&1; then
+              API_PORT=$port
+              echo "✅ API 监听在端口 ${port}"
               break
             fi
-            echo "等待 API 就绪... (${i}/30)"
-            sleep 2
           done
 
+          # 若快速检测没命中，继续轮询（最多再等 60 秒）
+          if [ -z "$API_PORT" ]; then
+            for i in $(seq 1 30); do
+              for port in 8000 80; do
+                if curl -sf --max-time 3 http://localhost:${port}/docs > /dev/null 2>&1; then
+                  API_PORT=$port
+                  echo "✅ Douyin API 已就绪 port=${port} (第 ${i} 次检测)"
+                  break 2
+                fi
+              done
+              echo "等待 API 就绪... (${i}/30)"
+              sleep 2
+            done
+          fi
+
+          # 健康检查彻底失败时打印日志并终止
+          if [ -z "$API_PORT" ]; then
+            echo "❌ API 启动超时，容器日志如下："
+            docker logs douyin_api 2>&1
+            exit 1
+          fi
+
+          # 将实际端口写入 GITHUB_ENV，供后续步骤使用
+          echo "DOUYIN_API_PORT=${API_PORT}" >> $GITHUB_ENV
 
       - name: Run parser
         env:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
-          DOUYIN_API_BASE: "http://localhost:8080"
+          DOUYIN_API_BASE: "http://localhost:${{ env.DOUYIN_API_PORT }}"
           SHARE_TEXT: "${{ github.event.issue.title }} ${{ github.event.issue.body }}"
         run: |
           echo "开始解析..."
