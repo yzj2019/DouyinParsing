@@ -106,6 +106,16 @@ jobs:
           # 将实际端口写入 GITHUB_ENV，供后续步骤使用
           echo "DOUYIN_API_PORT=${API_PORT}" >> $GITHUB_ENV
 
+      - name: 诊断：测试 Douyin API 端点响应
+        run: |
+          echo "=== 测试容器 API 端点（最多等 90s）==="
+          curl -s --max-time 90 \
+            "http://localhost:${{ env.DOUYIN_API_PORT }}/api/hybrid/video_data?url=https://v.douyin.com/JWuzU5gqfdM/&minimal=true" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print('code:', d.get('code')); print('keys:', list(d.keys()))" \
+            || echo "⚠️ 诊断请求失败或超时"
+          echo "=== 容器最新日志 ==="
+          docker logs douyin_api 2>&1 | tail -20
+
       - name: Run parser
         env:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}

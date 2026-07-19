@@ -59,7 +59,7 @@ def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
     }
 
     try:
-        response = requests.get(DOUYIN_ONLINE_API, params=params, timeout=15)
+        response = requests.get(DOUYIN_ONLINE_API, params=params, timeout=60)
         response.raise_for_status()
         res_json = response.json()
 
