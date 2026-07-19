@@ -135,7 +135,7 @@ jobs:
             echo "**✅ 解析成功！**" >> comment_body.md
             echo "" >> comment_body.md
 
-            # 润色后的书面文案（主要内容，展开展示）
+            # 润色后的书面文案（代码块展示，方便一键复制）
             echo "**📝 润色后文案：**" >> comment_body.md
             echo '```text' >> comment_body.md
             cat polished.txt >> comment_body.md
