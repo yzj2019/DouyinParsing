@@ -54,16 +54,15 @@ jobs:
           with open(path, "r", encoding="utf-8") as f:
               cfg = yaml.safe_load(f) or {}
 
-          # 兼容两种常见结构：顶层 Cookie 字段 / headers.Cookie 子字段
-          if "headers" in cfg and isinstance(cfg["headers"], dict):
-              cfg["headers"]["Cookie"] = cookie
-          else:
-              cfg["Cookie"] = cookie
+          # 实际结构：TokenManager.douyin.headers.Cookie
+          cfg.setdefault("TokenManager", {}) \
+             .setdefault("douyin", {}) \
+             .setdefault("headers", {})["Cookie"] = cookie
 
           with open(path, "w", encoding="utf-8") as f:
               yaml.dump(cfg, f, allow_unicode=True)
 
-          print("✅ Cookie 注入成功")
+          print("✅ Cookie 注入路径: TokenManager.douyin.headers.Cookie")
           PYEOF
             # 将修改后的配置写回容器并重启
             docker cp ./config.yaml douyin_api:/app/crawlers/douyin/web/config.yaml
