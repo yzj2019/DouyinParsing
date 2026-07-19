@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sys
 import re
@@ -169,21 +170,48 @@ def polish_transcript_via_llm(raw_text: str) -> str:
         "extra_body": {"enable_thinking": False},
         "temperature": 0.3,   # 低温度保证结果稳定、不过度发散
         "max_tokens": 4096,
+        "stream": True,       # 开启流式输出，边生成边打印，避免长文本超时
     }
 
+    # timeout=(连接超时, 读取超时)：连接 10s，单次读取 120s
     res = requests.post(
         SILICONFLOW_LLM_URL,
         headers=headers,
         json=payload,
-        timeout=60,
+        timeout=(10, 120),
+        stream=True,
     )
 
-    if res.status_code == 200:
-        return res.json()["choices"][0]["message"]["content"].strip()
-    else:
+    if res.status_code != 200:
         raise RuntimeError(
             f"硅基流动 LLM 润色失败 [{res.status_code}]: {res.text}"
         )
+
+    # 逐行解析 SSE 数据流，实时打印并拼接完整文本
+    print("\n================ 润色后文案 ================")
+    full_content = []
+    for line in res.iter_lines():
+        if not line:
+            continue
+        # SSE 格式：每行以 "data: " 开头
+        text = line.decode("utf-8") if isinstance(line, bytes) else line
+        if not text.startswith("data:"):
+            continue
+        data_str = text[len("data:"):].strip()
+        if data_str == "[DONE]":
+            break
+        try:
+            chunk = json.loads(data_str)
+        except json.JSONDecodeError:
+            continue
+        delta = chunk.get("choices", [{}])[0].get("delta", {})
+        token = delta.get("content", "")
+        if token:
+            print(token, end="", flush=True)
+            full_content.append(token)
+
+    print("\n============================================\n")
+    return "".join(full_content)
 
 
 # ==================== 实际运行测试 ====================
@@ -210,16 +238,8 @@ if __name__ == "__main__":
             "=============================================\n"
         )
 
-        # 3. LLM 润色
+        # 3. LLM 润色（函数内部已实时打印流式输出，无需在此重复打印）
         polished = polish_transcript_via_llm(transcript)
-
-        print(
-            "\n================ 润色后文案 ================"
-        )
-        print(polished)
-        print(
-            "============================================\n"
-        )
 
         # 将 ASR 原始口播文案写入文件
         with open("transcript.txt", "w", encoding="utf-8") as f:
