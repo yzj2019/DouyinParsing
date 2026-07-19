@@ -11,10 +11,25 @@ DOUYIN_ONLINE_API = "https://douyin.wtf/api/hybrid/video_data"
 # 2. 硅基流动的 API Key 和请求地址
 SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
 SILICONFLOW_ASR_URL = "https://api.siliconflow.cn/v1/audio/transcriptions"
+SILICONFLOW_LLM_URL = "https://api.siliconflow.cn/v1/chat/completions"
 
 # 3. 选择语音识别模型 (推荐阿里 SenseVoiceSmall，速度快且自带标点)
 ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
+
+# 4. 选择文案润色 LLM (Qwen/Qwen3-8B 为硅基流动永久免费、中文能力强)
+LLM_MODEL = "Qwen/Qwen3-8B"
 # ==================================================
+
+# 文案润色的系统 Prompt
+LLM_SYSTEM_PROMPT = """你是一名专业的短视频文案编辑。
+你的任务是将用户提供的语音识别原文（通常无标点、含大量口语废话）润色成一份干净、易读的书面文案。
+
+处理规则：
+1. 去除口语废话词：「呃」「啊」「那个」「然后」「就是说」「嗯」「对吧」「你知道吧」等。
+2. 补全标点符号（逗号、句号、问号、感叹号等），让句子结构清晰。
+3. 按照语义逻辑合理分段，每段约 2~4 句话，不要整段塞在一起。
+4. 保留原文的核心信息和表达风格，不要过度增加、删减或改写语义。
+5. 仅输出润色后的正文，不要附加任何说明、前言或后记。"""
 
 
 def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
@@ -119,6 +134,49 @@ def transcribe_via_siliconflow(media_url: str, media_type: str) -> str:
         )
 
 
+
+def polish_transcript_via_llm(raw_text: str) -> str:
+    """第四步：调用硅基流动 LLM 将 ASR 原文润色为分段、有标点的书面文案
+
+    参数:
+        raw_text: 语音识别输出的原始文本（通常无标点、含口语废话）
+
+    返回:
+        polished_text: 润色后的书面文案字符串
+    """
+    print(f"4. 正在调用 {LLM_MODEL} 进行文案润色...")
+
+    headers = {
+        "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": LLM_SYSTEM_PROMPT},
+            {"role": "user", "content": raw_text},
+        ],
+        # 关闭思维链，直接输出结果（Qwen3 特有参数）
+        "extra_body": {"enable_thinking": False},
+        "temperature": 0.3,   # 低温度保证结果稳定、不过度发散
+        "max_tokens": 4096,
+    }
+
+    res = requests.post(
+        SILICONFLOW_LLM_URL,
+        headers=headers,
+        json=payload,
+        timeout=60,
+    )
+
+    if res.status_code == 200:
+        return res.json()["choices"][0]["message"]["content"].strip()
+    else:
+        raise RuntimeError(
+            f"硅基流动 LLM 润色失败 [{res.status_code}]: {res.text}"
+        )
+
+
 # ==================== 实际运行测试 ====================
 if __name__ == "__main__":
     # 优先使用命令行传入的分享文本或链接
@@ -136,16 +194,31 @@ if __name__ == "__main__":
         transcript = transcribe_via_siliconflow(real_media_url, m_type)
 
         print(
-            "\n================ 解析成功！文案内容如下 ================"
+            "\n================ ASR 原始文案 ================"
         )
         print(transcript)
         print(
-            "========================================================\n"
+            "=============================================\n"
         )
-        
-        # 将纯净版文案单独写入文件，方便外部流程（如 GitHub Action）直接读取提取
+
+        # 3. LLM 润色
+        polished = polish_transcript_via_llm(transcript)
+
+        print(
+            "\n================ 润色后文案 ================"
+        )
+        print(polished)
+        print(
+            "============================================\n"
+        )
+
+        # 将 ASR 原始口播文案写入文件
         with open("transcript.txt", "w", encoding="utf-8") as f:
             f.write(transcript)
+
+        # 将润色后的书面文案写入文件，方便外部流程（如 GitHub Action）直接读取
+        with open("polished.txt", "w", encoding="utf-8") as f:
+            f.write(polished)
 
     except Exception as err:
         print(f"\n❌ 运行出错: {err}")

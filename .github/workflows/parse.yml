@@ -40,11 +40,25 @@ jobs:
           echo "" >> comment_body.md
           
           if [ -f transcript.txt ]; then
-            echo "**✅ 解析成功！视频文案：**" >> comment_body.md
+            echo "**✅ 解析成功！**" >> comment_body.md
+            echo "" >> comment_body.md
+
+            # 润色后的书面文案（主要内容，展开展示）
+            echo "**📝 润色后文案：**" >> comment_body.md
+            echo '```text' >> comment_body.md
+            cat polished.txt >> comment_body.md
+            echo "" >> comment_body.md
+            echo '```' >> comment_body.md
+            echo "" >> comment_body.md
+
+            # ASR 原始口播文案（折叠展示，供对比）
+            echo "<details><summary>🎙️ ASR 原始口播文案（点击展开）</summary>" >> comment_body.md
+            echo "" >> comment_body.md
             echo '```text' >> comment_body.md
             cat transcript.txt >> comment_body.md
             echo "" >> comment_body.md
             echo '```' >> comment_body.md
+            echo "</details>" >> comment_body.md
           else
             echo "**❌ 解析失败，请展开上方日志查看原因。**" >> comment_body.md
           fi
