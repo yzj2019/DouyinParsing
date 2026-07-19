@@ -15,10 +15,10 @@ python .\main.py
 python .\main.py "你的分享文本或链接"
 ```
 
-GitHub Actions 在线调用：
+GitHub Issues 在线调用（像聊天机器人一样）：
 
 1. fork 本项目到你的 GitHub 仓库（或者直接在当前仓库）。
 2. 在你的仓库 `Settings -> Secrets and variables -> Actions` 中，点击 `New repository secret`，添加一个名为 `SILICONFLOW_API_KEY` 的 Secret，值为你的硅基流动 API Key。
-3. 在你的仓库 `Actions` 页面中，选择左侧的 `抖音文案解析 (Douyin Parsing)` 工作流。
-4. 点击 `Run workflow`，在弹出的输入框中填入抖音分享文本或链接，点击执行。
-5. 等待执行完成后，点击进入该次执行记录的 `Run parser` 步骤，即可看到解析并转换后的文案内容。
+3. 在你的仓库中，点击 `Issues` 标签页，创建一个 **New issue**。
+4. 将你的抖音分享文本或链接写在 Issue 的标题或正文里，点击 `Submit new issue`。
+5. 几秒钟后，GitHub Actions 机器人会自动执行提取，并将解析后的文案**以评论的形式**回复在这个 Issue 下！

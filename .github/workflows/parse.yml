@@ -1,16 +1,14 @@
-name: 抖音文案解析 (Douyin Parsing)
+name: 抖音文案解析 (Issue Bot)
 
 on:
-  workflow_dispatch:
-    inputs:
-      share_text:
-        description: '请输入抖音分享文本或链接'
-        required: true
-        type: string
+  issues:
+    types: [opened]
 
 jobs:
   parse:
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,4 +24,19 @@ jobs:
       - name: Run parser
         env:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
-        run: python main.py "${{ github.event.inputs.share_text }}"
+          SHARE_TEXT: "${{ github.event.issue.title }} ${{ github.event.issue.body }}"
+        run: |
+          echo "开始解析..."
+          # 运行解析并收集输出，失败也不终止工作流以便回传错误信息
+          python main.py "$SHARE_TEXT" > result.txt 2>&1 || true
+          
+          # 将结果拼接为 Markdown，准备作为评论
+          echo '```text' > comment_body.md
+          cat result.txt >> comment_body.md
+          echo '```' >> comment_body.md
+
+      - name: Comment on Issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment ${{ github.event.issue.number }} --body-file comment_body.md
