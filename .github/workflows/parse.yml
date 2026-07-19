@@ -21,9 +21,64 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
+      - name: 启动本地 Douyin 解析 API (Docker)
+        run: |
+          # 拉起官方镜像（后台运行，端口 8080 -> 容器内 80）
+          docker run -d \
+            --name douyin_api \
+            -p 8080:80 \
+            evil0ctal/douyin_tiktok_download_api:latest
+
+          # 等待容器初始化，再复制默认配置
+          sleep 10
+
+          # 从容器中取出默认 config.yaml
+          docker cp douyin_api:/app/crawlers/douyin/web/config.yaml ./config.yaml 2>/dev/null \
+            && echo "已取得默认配置文件" \
+            || echo "⚠️  未找到 config.yaml，跳过 Cookie 注入"
+
+          # 将 DOUYIN_COOKIE Secret 注入配置（兼容多种 YAML 结构）
+          if [ -f ./config.yaml ] && [ -n "${{ secrets.DOUYIN_COOKIE }}" ]; then
+            python3 - <<'PYEOF'
+          import yaml, sys
+
+          cookie = "${{ secrets.DOUYIN_COOKIE }}"
+          path = "./config.yaml"
+
+          with open(path, "r", encoding="utf-8") as f:
+              cfg = yaml.safe_load(f) or {}
+
+          # 兼容两种常见结构：顶层 Cookie 字段 / headers.Cookie 子字段
+          if "headers" in cfg and isinstance(cfg["headers"], dict):
+              cfg["headers"]["Cookie"] = cookie
+          else:
+              cfg["Cookie"] = cookie
+
+          with open(path, "w", encoding="utf-8") as f:
+              yaml.dump(cfg, f, allow_unicode=True)
+
+          print("✅ Cookie 注入成功")
+          PYEOF
+            # 将修改后的配置写回容器并重启
+            docker cp ./config.yaml douyin_api:/app/crawlers/douyin/web/config.yaml
+            docker restart douyin_api
+            sleep 5
+          fi
+
+          # 轮询等待 API 健康（最多 60 秒）
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/docs > /dev/null 2>&1; then
+              echo "✅ Douyin API 已就绪 (第 ${i} 次检测)"
+              break
+            fi
+            echo "等待 API 就绪... (${i}/30)"
+            sleep 2
+          done
+
       - name: Run parser
         env:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          DOUYIN_API_BASE: "http://localhost:8080"
           SHARE_TEXT: "${{ github.event.issue.title }} ${{ github.event.issue.body }}"
         run: |
           echo "开始解析..."

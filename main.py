@@ -5,8 +5,9 @@ import re
 import requests
 
 # ==================== 配置区域 ====================
-# 1. douyin.wtf 混合解析接口
-DOUYIN_ONLINE_API = "https://douyin.wtf/api/hybrid/video_data"
+# 1. 解析接口：默认指向 douyin.wtf，可通过环境变量 DOUYIN_API_BASE 覆盖（如自建 Docker 实例）
+_api_base = os.environ.get("DOUYIN_API_BASE", "https://douyin.wtf").rstrip("/")
+DOUYIN_ONLINE_API = _api_base + "/api/hybrid/video_data"
 
 # 2. 硅基流动的 API Key 和请求地址
 SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", "")

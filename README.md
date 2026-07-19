@@ -25,9 +25,17 @@ GitHub Issues 在线调用（像聊天机器人一样）：
 
 1. fork 本项目到你的 GitHub 仓库（或者直接在当前仓库）。
 2. 在你的仓库 `Settings -> Secrets and variables -> Actions` 中，点击 `New repository secret`，添加一个名为 `SILICONFLOW_API_KEY` 的 Secret，值为你的硅基流动 API Key。
-3. 在你的仓库中，点击 `Issues` 标签页，创建一个 **New issue**。
-4. 将你的抖音分享文本或链接写在 Issue 的标题或正文里，点击 `Submit new issue`。
-5. 几秒钟后，GitHub Actions 机器人会自动执行提取，并将解析后的文案**以评论的形式**回复在这个 Issue 下！
+3. 添加抖音 Cookie（**用于 GitHub Actions 内自建解析服务，绕过公共 API 限速**）：
+   - 浏览器登录 [抖音网页版](https://www.douyin.com)，按 `F12` 打开开发者工具
+   - 切换到 `Network` 标签页，刷新页面，随便点开一条请求
+   - 在 `Headers` → `Request Headers` 中找到 `Cookie` 字段，复制其完整值
+   - 回到仓库 `Settings -> Secrets -> Actions`，添加名为 `DOUYIN_COOKIE` 的 Secret，粘贴刚才复制的 Cookie 值
+
+   > ⚠️ 抖音 Cookie 有效期约数天至数周，失效后需重新抓取并更新 Secret。
+
+4. 在你的仓库中，点击 `Issues` 标签页，创建一个 **New issue**。
+5. 将你的抖音分享文本或链接写在 Issue 的标题或正文里，点击 `Submit new issue`。
+6. 几秒钟后，GitHub Actions 机器人会自动执行提取，并将解析后的文案**以评论的形式**回复在这个 Issue 下！
 
 TBD：
 1. 长视频支持
