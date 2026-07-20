@@ -66,6 +66,18 @@ def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
     try:
         response = requests.get(DOUYIN_ONLINE_API, params=params, timeout=60)
         response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        if "douyin.wtf" not in DOUYIN_ONLINE_API:
+            print(f" -> [Warn] 本地/自定义接口请求失败 ({e})，正在自动切换至 douyin.wtf 官方接口重试...")
+            try:
+                response = requests.get("https://douyin.wtf/api/hybrid/video_data", params=params, timeout=60)
+                response.raise_for_status()
+            except requests.exceptions.RequestException as e2:
+                raise RuntimeError(f"网络请求失败，本地和官方 API 均无法连接: {e2}")
+        else:
+            raise RuntimeError(f"网络请求失败，无法连接到 douyin.wtf API: {e}")
+
+    try:
         res_json = response.json()
 
         # 检查接口 HTTP 状态码与业务 code
@@ -93,12 +105,18 @@ def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
             print(" -> 成功获取无水印视频流地址！")
             return video_url_list[0], "mp4"
 
+        # 3. 尝试获取无水印视频流 (新版 video_data 结构)
+        nwm_video_url = data.get("video_data", {}).get("nwm_video_url")
+        if nwm_video_url:
+            print(" -> 成功获取无水印视频流地址(新版结构)！")
+            return nwm_video_url, "mp4"
+
         print(" -> [Debug] 无法提取有效链接，API 原始返回数据如下：")
         print(json.dumps(res_json, ensure_ascii=False, indent=2))
         raise ValueError("无法从接口返回的数据中提取到有效的音频或视频下载链接。")
 
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"网络请求失败，无法连接到 douyin.wtf API: {e}")
+    except ValueError as e:
+        raise e
 
 
 def transcribe_via_siliconflow(media_url: str, media_type: str) -> str:
