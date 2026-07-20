@@ -93,6 +93,8 @@ def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
             print(" -> 成功获取无水印视频流地址！")
             return video_url_list[0], "mp4"
 
+        print(" -> [Debug] 无法提取有效链接，API 原始返回数据如下：")
+        print(json.dumps(res_json, ensure_ascii=False, indent=2))
         raise ValueError("无法从接口返回的数据中提取到有效的音频或视频下载链接。")
 
     except requests.exceptions.RequestException as e:
