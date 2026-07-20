@@ -214,6 +214,7 @@ def polish_transcript_via_llm(raw_text: str) -> str:
     # 逐行解析 SSE 数据流，实时打印并拼接完整文本
     print("\n================ 润色后文案 ================")
     full_content = []
+    has_started_printing = False
     for line in res.iter_lines():
         if not line:
             continue
@@ -231,11 +232,16 @@ def polish_transcript_via_llm(raw_text: str) -> str:
         delta = chunk.get("choices", [{}])[0].get("delta", {})
         token = delta.get("content", "")
         if token:
+            if not has_started_printing:
+                token = token.lstrip()
+                if not token:
+                    continue
+                has_started_printing = True
             print(token, end="", flush=True)
             full_content.append(token)
 
     print("\n============================================\n")
-    return "".join(full_content)
+    return "".join(full_content).strip()
 
 
 # ==================== 实际运行测试 ====================
