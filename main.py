@@ -123,11 +123,17 @@ def transcribe_via_siliconflow(media_url: str, media_type: str) -> str:
     """第二与第三步：在内存中拉取流媒体，并直接发给硅基流动进行 ASR 识别"""
     print("2. 正在拉取音视频流数据（纯内存操作，不写入硬盘）...")
 
+    cookie = os.environ.get("DOUYIN_COOKIE", "")
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.douyin.com/",
+        "Accept": "*/*",
     }
+    if cookie:
+        headers["Cookie"] = cookie
+
     media_response = requests.get(
-        media_url, headers=headers, stream=True, timeout=20
+        media_url, headers=headers, stream=True, timeout=(10, 60)
     )
     media_response.raise_for_status()
 
