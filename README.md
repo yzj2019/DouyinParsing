@@ -38,17 +38,21 @@ graph TD
 你可以把这个项目当成一个**免费的聊天机器人**，直接在 GitHub Issues 里提交链接，机器人会自动回复文案结果！不仅无需配置本地环境，还不占用任何本地资源。
 
 1. **Fork 本仓库** 到你的 GitHub 账号下。
-2. 在仓库的 `Settings -> Secrets and variables -> Actions` 中，点击 `New repository secret`，添加 `SILICONFLOW_API_KEY`，值为你的硅基流动 API Key。
+2. **开启前置开关（仅需配置一次，GitHub 默认对 Fork 仓库关闭以下功能）**：
+   - **开启 Issues 功能**：进入 Fork 后的仓库 -> 点击顶部 **Settings** -> 在 **General** 页面向下滚动到 **Features** 区域 -> 勾选 **Issues**（否则顶部不会显示 Issues 标签页）。
+   - **启用 GitHub Actions**：点击仓库顶部的 **Actions** 标签页 -> 点击绿色的 **"I understand my workflows, go ahead and enable them"** 启用工作流。
+   - **授予 Actions 写入权限**：进入 **Settings** -> 左侧菜单点击 **Actions** -> **General** -> 页面滚动到底部 **Workflow permissions** -> 选择 **Read and write permissions** 并点击 **Save**（确保机器人有权限在 Issue 下发表回复）。
+3. 在仓库的 `Settings -> Secrets and variables -> Actions` 中，点击 `New repository secret`，添加 `SILICONFLOW_API_KEY`，值为你的硅基流动 API Key。
    - *(可选)* 添加 `SILICONFLOW_TIMEOUT`（默认为 `180` 秒），针对超长音频或海外网络可配置为 `240` 或 `300`。
-3. **注入抖音 Cookie**（用于内部拉起 Docker 解析服务，绕过公共 API 限速）：
+4. **注入抖音 Cookie**（用于内部拉起 Docker 解析服务，绕过公共 API 限速）：
    - 电脑浏览器无痕模式打开 [抖音网页版](https://www.douyin.com)，按 `F12` 开启开发者工具。
    - 切换到 `Network` 标签页，刷新页面，随意选中一条网络请求。
    - 在 `Headers` → `Request Headers` 找到 `Cookie` 字段，**完整复制**其内容。
    - 返回仓库 `Secrets`，添加名为 `DOUYIN_COOKIE` 的环境变量并粘贴。
    - *⚠️ 注：Cookie 具有时效性，若遇到解析失败请尝试重新获取更新。*
-4. 在仓库顶部导航栏点击 **Issues**，创建一个 **New issue**。
-5. 将抖音分享文本/链接写在 Issue 标题或正文，点击 **Submit new issue**。
-6. 喝口水 ☕，几秒钟后，GitHub Actions Bot 就会把排版精美的文案回复在评论区！
+5. 在仓库顶部导航栏点击 **Issues**，创建一个 **New issue**。
+6. 将抖音分享文本/链接写在 Issue 标题或正文，点击 **Submit new issue**。
+7. 喝口水 ☕，几秒钟后，GitHub Actions Bot 就会把排版精美的文案回复在评论区！
 
 ### 方式二：本地调用
 
