@@ -13,7 +13,7 @@
 - **⚡ 极速解析**：底层依赖强大的 [Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API)，智能提取纯音频或无水印视频，最大化节省带宽与时间。
 - **🧠 智能识别 (ASR)**：接入硅基流动提供的 `FunAudioLLM/SenseVoiceSmall`，识别速度极快，自带标点支持，应对复杂口播毫无压力。
 - **📝 极致润色 (LLM)**：搭载 `Qwen/Qwen3-8B` 大模型，不仅能去除口语化废话（“呃”、“那个”、“对吧”），还能根据逻辑自动进行**合理的段落切分**。
-- **🌊 流式输出**：大模型润色阶段全面采用 **SSE 流式输出**（Streaming），边生成边渲染，彻底告别长视频（万字文案）带来的超时报错与漫长等待。
+- **🌊 流式输出与重试容错**：大模型润色阶段全面采用 **SSE 流式输出**（Streaming）；ASR 与 LLM 全链路配置**弹性超时与指数退避自动重试**（默认 3 次），彻底告别长音频或跨国网络延迟带来的超时报错与单次中断。
 - **☁️ Serverless 体验**：支持通过 **GitHub Actions + Issues** 实现零服务器成本的在线云端调用。
 
 ---
@@ -24,8 +24,8 @@
 graph TD
     A[抖音分享文本/链接] --> B(Douyin API 解析)
     B -->|无水印视频 / 纯音频链接| C(流媒体内存拉取)
-    C -->|纯内存操作，不落盘| D{SenseVoiceSmall ASR}
-    D -->|口语化粗糙文案| E(Qwen3-8B 润色提取)
+    C -->|纯内存操作，不落盘| D{SenseVoiceSmall ASR<br/>自动重试 + 弹性超时}
+    D -->|口语化粗糙文案| E(Qwen3-8B 润色提取<br/>流式输出 + 容错重试)
     E -->|流式输出| F[✨ 结构化书面文案]
 ```
 
@@ -39,6 +39,7 @@ graph TD
 
 1. **Fork 本仓库** 到你的 GitHub 账号下。
 2. 在仓库的 `Settings -> Secrets and variables -> Actions` 中，点击 `New repository secret`，添加 `SILICONFLOW_API_KEY`，值为你的硅基流动 API Key。
+   - *(可选)* 添加 `SILICONFLOW_TIMEOUT`（默认为 `180` 秒），针对超长音频或海外网络可配置为 `240` 或 `300`。
 3. **注入抖音 Cookie**（用于内部拉起 Docker 解析服务，绕过公共 API 限速）：
    - 电脑浏览器无痕模式打开 [抖音网页版](https://www.douyin.com)，按 `F12` 开启开发者工具。
    - 切换到 `Network` 标签页，刷新页面，随意选中一条网络请求。
@@ -60,8 +61,13 @@ pip install requests
 # 2. 将硅基流动的 API Key 配置进环境变量 SILICONFLOW_API_KEY
 # Windows PowerShell:
 $env:SILICONFLOW_API_KEY="你的API_Key"
+# 可选：配置超时时间（默认 180 秒）
+# $env:SILICONFLOW_TIMEOUT="180"
+
 # Linux / macOS:
 export SILICONFLOW_API_KEY="你的API_Key"
+# 可选：配置超时时间（默认 180 秒）
+# export SILICONFLOW_TIMEOUT="180"
 
 # 3. 运行默认测试链接
 python main.py

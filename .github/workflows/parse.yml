@@ -115,6 +115,7 @@ jobs:
       - name: Run parser
         env:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          SILICONFLOW_TIMEOUT: ${{ vars.SILICONFLOW_TIMEOUT || '180' }}
           DOUYIN_API_BASE: "http://localhost:${{ env.DOUYIN_API_PORT }}"
           SHARE_TEXT: "${{ github.event.issue.title }} ${{ github.event.issue.body }}"
         run: |

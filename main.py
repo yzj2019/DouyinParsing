@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import re
+import time
 import requests
 
 # ==================== 配置区域 ====================
@@ -10,10 +11,12 @@ import requests
 _api_base = os.environ.get("DOUYIN_API_BASE", "https://douyin.wtf").rstrip("/")
 DOUYIN_ONLINE_API = _api_base + "/api/hybrid/video_data"
 
-# 2. 硅基流动的 API Key 和请求地址
+# 2. 硅基流动的 API Key、请求地址与超时设置
 SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
 SILICONFLOW_ASR_URL = "https://api.siliconflow.cn/v1/audio/transcriptions"
 SILICONFLOW_LLM_URL = "https://api.siliconflow.cn/v1/chat/completions"
+# 读取超时时间（秒），应对长音视频和跨国网络延迟，默认 180 秒
+SILICONFLOW_TIMEOUT = int(os.environ.get("SILICONFLOW_TIMEOUT", "180"))
 
 # 3. 选择语音识别模型 (推荐阿里 SenseVoiceSmall，速度快且自带标点)
 ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
@@ -51,7 +54,10 @@ def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
 
     返回: (media_url, media_type) -> ("https://...", "mp3"|"mp4")
     """
-    print("1. 正在调用 douyin.wtf 混合解析接口...")
+    if "douyin.wtf" in DOUYIN_ONLINE_API:
+        print("1. 正在调用 douyin.wtf 混合解析接口...")
+    else:
+        print(f"1. 正在调用自定义/本地解析接口 ({_api_base})...")
 
     # 从分享文本中提取真正的 URL，防止多余的字符导致 API 400 错误
     url_match = re.search(r'(https?://[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|])', share_text_or_url)
@@ -119,8 +125,8 @@ def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
         raise e
 
 
-def transcribe_via_siliconflow(media_url: str, media_type: str) -> str:
-    """第二与第三步：在内存中拉取流媒体，并直接发给硅基流动进行 ASR 识别"""
+def transcribe_via_siliconflow(media_url: str, media_type: str, max_retries: int = 3) -> str:
+    """第二与第三步：在内存中拉取流媒体，并直接发给硅基流动进行 ASR 识别（带自动重试与超时保护）"""
     print("2. 正在拉取音视频流数据（纯内存操作，不写入硬盘）...")
 
     cookie = os.environ.get("DOUYIN_COOKIE", "")
@@ -138,48 +144,86 @@ def transcribe_via_siliconflow(media_url: str, media_type: str) -> str:
     media_response.raise_for_status()
 
     # 将拉取到的二进制数据压入内存流
-    media_buffer = io.BytesIO(media_response.content)
-    # 根据类型动态赋予后缀名，让 API 能够正确识别编码格式
+    raw_content = media_response.content
+    media_buffer = io.BytesIO(raw_content)
     media_buffer.name = f"audio.{media_type}"
+    media_size_mb = len(raw_content) / (1024 * 1024)
 
-    print(f"3. 正在将数据发送至硅基流动 ({ASR_MODEL}) 进行识别...")
+    print(
+        f"3. 正在将数据发送至硅基流动 ({ASR_MODEL}) 进行识别 "
+        f"(大小: {media_size_mb:.2f}MB, 单次读取超时: {SILICONFLOW_TIMEOUT}s)..."
+    )
     auth_headers = {"Authorization": f"Bearer {SILICONFLOW_API_KEY}"}
-    files = {
-        "file": (
-            media_buffer.name,
-            media_buffer,
-            f"audio/{media_type}"
-            if media_type == "mp3"
-            else f"video/{media_type}",
-        )
-    }
     payload = {
         "model": ASR_MODEL,
         "response_format": "json",  # 支持 "json", "text", "srt" 等
     }
 
-    res = requests.post(
-        SILICONFLOW_ASR_URL,
-        headers=auth_headers,
-        files=files,
-        data=payload,
-        timeout=45,
-    )
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        # 每次重试前必须重置内存文件指针，否则后续重试发送的数据为空
+        media_buffer.seek(0)
+        files = {
+            "file": (
+                media_buffer.name,
+                media_buffer,
+                f"audio/{media_type}"
+                if media_type == "mp3"
+                else f"video/{media_type}",
+            )
+        }
 
-    if res.status_code == 200:
-        return res.json().get("text", "")
-    else:
-        raise RuntimeError(
-            f"硅基流动语音识别失败 [{res.status_code}]: {res.text}"
-        )
+        try:
+            if attempt > 1:
+                print(f" -> [ASR 重试] 正在进行第 {attempt}/{max_retries} 次转录请求...")
+
+            res = requests.post(
+                SILICONFLOW_ASR_URL,
+                headers=auth_headers,
+                files=files,
+                data=payload,
+                timeout=(15, SILICONFLOW_TIMEOUT),
+            )
+
+            if res.status_code == 200:
+                return res.json().get("text", "")
+
+            # 针对服务端偶发 502/503/504 错误进行退避重试
+            if res.status_code in (502, 503, 504) and attempt < max_retries:
+                wait_seconds = attempt * 3
+                print(f" -> [Warn] 硅基流动服务端偶发繁忙 [{res.status_code}]，等待 {wait_seconds}s 后重试...")
+                time.sleep(wait_seconds)
+                continue
+
+            raise RuntimeError(
+                f"硅基流动语音识别失败 [{res.status_code}]: {res.text}"
+            )
+
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            last_err = e
+            if attempt < max_retries:
+                wait_seconds = attempt * 3
+                print(f" -> [Warn] ASR 请求超时或连接异常 ({e})，等待 {wait_seconds}s 后重试 ({attempt}/{max_retries})...")
+                time.sleep(wait_seconds)
+            else:
+                raise RuntimeError(
+                    f"硅基流动语音识别超时或网络异常（已重试 {max_retries} 次，当前单次读取超时限制为 {SILICONFLOW_TIMEOUT}s）: {e}\n"
+                    f"💡 提示：对于长音频或海外网络环境，可设置环境变量 SILICONFLOW_TIMEOUT 进一步调大超时时间（例如 300）"
+                ) from e
+        except Exception as e:
+            raise e
+
+    if last_err:
+        raise last_err
 
 
 
-def polish_transcript_via_llm(raw_text: str) -> str:
-    """第四步：调用硅基流动 LLM 将 ASR 原文润色为分段、有标点的书面文案
+def polish_transcript_via_llm(raw_text: str, max_retries: int = 3) -> str:
+    """第四步：调用硅基流动 LLM 将 ASR 原文润色为分段、有标点的书面文案（带自动重试）
 
     参数:
         raw_text: 语音识别输出的原始文本（通常无标点、含口语废话）
+        max_retries: 最大重试次数，默认 3 次
 
     返回:
         polished_text: 润色后的书面文案字符串
@@ -203,51 +247,78 @@ def polish_transcript_via_llm(raw_text: str) -> str:
         "stream": True,       # 开启流式输出，边生成边打印，避免长文本超时
     }
 
-    # timeout=(连接超时, 读取超时)：连接 10s，单次读取 120s
-    res = requests.post(
-        SILICONFLOW_LLM_URL,
-        headers=headers,
-        json=payload,
-        timeout=(10, 120),
-        stream=True,
-    )
-
-    if res.status_code != 200:
-        raise RuntimeError(
-            f"硅基流动 LLM 润色失败 [{res.status_code}]: {res.text}"
-        )
-
-    # 逐行解析 SSE 数据流，实时打印并拼接完整文本
-    print("\n================ 润色后文案 ================")
-    full_content = []
-    has_started_printing = False
-    for line in res.iter_lines():
-        if not line:
-            continue
-        # SSE 格式：每行以 "data: " 开头
-        text = line.decode("utf-8") if isinstance(line, bytes) else line
-        if not text.startswith("data:"):
-            continue
-        data_str = text[len("data:"):].strip()
-        if data_str == "[DONE]":
-            break
+    last_err = None
+    for attempt in range(1, max_retries + 1):
         try:
-            chunk = json.loads(data_str)
-        except json.JSONDecodeError:
-            continue
-        delta = chunk.get("choices", [{}])[0].get("delta", {})
-        token = delta.get("content", "")
-        if token:
-            if not has_started_printing:
-                token = token.lstrip()
-                if not token:
-                    continue
-                has_started_printing = True
-            print(token, end="", flush=True)
-            full_content.append(token)
+            if attempt > 1:
+                print(f" -> [LLM 重试] 正在进行第 {attempt}/{max_retries} 次润色请求...")
 
-    print("\n============================================\n")
-    return "".join(full_content).strip()
+            # timeout=(连接超时, 读取超时)：连接 15s，单次读取 120s
+            res = requests.post(
+                SILICONFLOW_LLM_URL,
+                headers=headers,
+                json=payload,
+                timeout=(15, 120),
+                stream=True,
+            )
+
+            if res.status_code != 200:
+                if res.status_code in (502, 503, 504) and attempt < max_retries:
+                    wait_seconds = attempt * 3
+                    print(f" -> [Warn] 硅基流动 LLM 服务端临时繁忙 [{res.status_code}]，等待 {wait_seconds}s 后重试...")
+                    time.sleep(wait_seconds)
+                    continue
+                raise RuntimeError(
+                    f"硅基流动 LLM 润色失败 [{res.status_code}]: {res.text}"
+                )
+
+            # 逐行解析 SSE 数据流，实时打印并拼接完整文本
+            print("\n================ 润色后文案 ================")
+            full_content = []
+            has_started_printing = False
+            for line in res.iter_lines():
+                if not line:
+                    continue
+                # SSE 格式：每行以 "data: " 开头
+                text = line.decode("utf-8") if isinstance(line, bytes) else line
+                if not text.startswith("data:"):
+                    continue
+                data_str = text[len("data:"):].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                token = delta.get("content", "")
+                if token:
+                    if not has_started_printing:
+                        token = token.lstrip()
+                        if not token:
+                            continue
+                        has_started_printing = True
+                    print(token, end="", flush=True)
+                    full_content.append(token)
+
+            print("\n============================================\n")
+            return "".join(full_content).strip()
+
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            last_err = e
+            if attempt < max_retries:
+                wait_seconds = attempt * 3
+                print(f" -> [Warn] LLM 请求超时或连接异常 ({e})，等待 {wait_seconds}s 后重试 ({attempt}/{max_retries})...")
+                time.sleep(wait_seconds)
+            else:
+                raise RuntimeError(
+                    f"硅基流动 LLM 润色超时或网络异常（已重试 {max_retries} 次）: {e}"
+                ) from e
+        except Exception as e:
+            raise e
+
+    if last_err:
+        raise last_err
 
 
 # ==================== 实际运行测试 ====================
@@ -287,3 +358,4 @@ if __name__ == "__main__":
 
     except Exception as err:
         print(f"\n❌ 运行出错: {err}")
+        sys.exit(1)
