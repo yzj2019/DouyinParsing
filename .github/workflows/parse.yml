@@ -153,7 +153,13 @@ jobs:
             echo '```' >> comment_body.md
             echo "</details>" >> comment_body.md
           else
-            echo "**❌ 解析失败，请展开上方日志查看原因。**" >> comment_body.md
+            if grep -q "未从该作品音视频中检测到有效口播语音" result_log.txt; then
+              echo "**⚠️ 未检测到有效口播语音**" >> comment_body.md
+              echo "" >> comment_body.md
+              echo "> 提示：该作品可能是图文笔记、纯背景音乐视频，或未收录有效人声口播。详细信息可展开上方运行日志查看。" >> comment_body.md
+            else
+              echo "**❌ 解析失败，请展开上方日志查看原因。**" >> comment_body.md
+            fi
           fi
 
       - name: Comment on Issue

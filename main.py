@@ -94,28 +94,28 @@ def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
         if not data:
             raise ValueError("解析成功，但未能获取到有效的数据结构(data为空)。")
 
-        # --- 策略：优先拿纯音频(省带宽极速识别)，拿不到再拿无水印视频 ---
-        # 1. 尝试获取独立背景音乐/音频
-        music_url_list = (
-            data.get("music", {}).get("play_url", {}).get("url_list", [])
-        )
-        if music_url_list and music_url_list[0]:
-            print(" -> 成功获取纯音频流地址！(耗时更短、带宽更省)")
-            return music_url_list[0], "mp3"
-
-        # 2. 尝试获取无水印视频流
+        # --- 策略：优先拿无水印视频流（保证包含口播人声+伴奏完整音轨），拿不到再降级尝试独立音频 ---
+        # 1. 优先尝试获取无水印视频流（包含完整口播录音）
         video_url_list = (
             data.get("video", {}).get("play_addr", {}).get("url_list", [])
         )
         if video_url_list and video_url_list[0]:
-            print(" -> 成功获取无水印视频流地址！")
+            print(" -> 成功获取无水印视频流地址！(包含完整口播与原声)")
             return video_url_list[0], "mp4"
 
-        # 3. 尝试获取无水印视频流 (新版 video_data 结构)
+        # 2. 尝试获取无水印视频流 (新版 video_data 结构)
         nwm_video_url = data.get("video_data", {}).get("nwm_video_url")
         if nwm_video_url:
-            print(" -> 成功获取无水印视频流地址(新版结构)！")
+            print(" -> 成功获取无水印视频流地址(新版结构)！(包含完整口播与原声)")
             return nwm_video_url, "mp4"
+
+        # 3. 降级备用：尝试获取独立背景音乐/音频（仅适用于纯音频条目或未提取到视频的作品）
+        music_url_list = (
+            data.get("music", {}).get("play_url", {}).get("url_list", [])
+        )
+        if music_url_list and music_url_list[0]:
+            print(" -> [降级备用] 未获取到视频流，正在使用独立音频流...")
+            return music_url_list[0], "mp3"
 
         print(" -> [Debug] 无法提取有效链接，API 原始返回数据如下：")
         print(json.dumps(res_json, ensure_ascii=False, indent=2))
@@ -344,6 +344,14 @@ if __name__ == "__main__":
         print(
             "=============================================\n"
         )
+
+        # 校验 ASR 识别结果是否包含有效口播文本
+        # 过滤掉纯标点、空白字符、无声占位符（如 '..', '...', '<|nospeech|>' 等）
+        valid_chars = re.findall(r'[\u4e00-\u9fa5a-zA-Z0-9]', transcript)
+        if not valid_chars:
+            raise ValueError(
+                "未从该作品音视频中检测到有效口播语音（该作品可能是图文笔记、纯背景音乐/无解说视频，或录音声音过小）。"
+            )
 
         # 3. LLM 润色（函数内部已实时打印流式输出，无需在此重复打印）
         polished = polish_transcript_via_llm(transcript)
