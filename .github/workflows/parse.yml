@@ -19,112 +19,15 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install requests pyyaml
-
-      - name: 启动本地 Douyin 解析 API (Docker)
-        env:
-          DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
         run: |
-          # 使用 host 网络模式（与官方 docker-compose 一致，直接共享宿主机网络）
-          docker run -d \
-            --name douyin_api \
-            --network host \
-            evil0ctal/douyin_tiktok_download_api:V4.1.2
-
-          # 等待容器初始化
-          sleep 10
-
-          # 从容器中取出默认 config.yaml
-          docker cp douyin_api:/app/crawlers/douyin/web/config.yaml ./config.yaml 2>/dev/null \
-            && echo "已取得默认配置文件" \
-            || echo "⚠️  未找到 config.yaml，跳过 Cookie 注入"
-
-          # 将 DOUYIN_COOKIE 安全清洗并注入配置（使用 PyYAML 规范解析，杜绝语法损坏）
-          if [ -f ./config.yaml ] && [ -n "$DOUYIN_COOKIE" ]; then
-            python3 - <<'PYEOF'
-          import os, re, yaml
-
-          raw_cookie = os.environ.get("DOUYIN_COOKIE", "").strip()
-          path = "./config.yaml"
-
-          # 1. 自动清洗 Cookie 常见脏数据（协议头前缀、换行符、外层多余引号）
-          clean_cookie = raw_cookie
-          if clean_cookie.lower().startswith("cookie:"):
-              clean_cookie = clean_cookie[7:].strip()
-          # 去除换行符并规整为单行标准 Cookie
-          clean_cookie = re.sub(r'[\r\n]+', ' ', clean_cookie).strip()
-          # 去除首尾可能多复制的双引号或单引号
-          if (clean_cookie.startswith('"') and clean_cookie.endswith('"')) or (clean_cookie.startswith("'") and clean_cookie.endswith("'")):
-              clean_cookie = clean_cookie[1:-1].strip()
-
-          with open(path, "r", encoding="utf-8") as f:
-              config = yaml.safe_load(f) or {}
-
-          # 2. 结构化赋值
-          headers = (
-              config.setdefault("TokenManager", {})
-                    .setdefault("douyin", {})
-                    .setdefault("headers", {})
-          )
-          headers["Cookie"] = clean_cookie
-
-          # 3. 规范写回 YAML
-          with open(path, "w", encoding="utf-8") as f:
-              yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
-
-          # 4. 语法复测自检
-          with open(path, "r", encoding="utf-8") as f:
-              test_cfg = yaml.safe_load(f)
-              assert test_cfg["TokenManager"]["douyin"]["headers"]["Cookie"] == clean_cookie
-
-          print(f"✅ Cookie 安全清洗并注入成功（有效长度: {len(clean_cookie)} 字符，YAML 语法合法）")
-          PYEOF
-            # 将修改后的配置写回容器并重启
-            docker cp ./config.yaml douyin_api:/app/crawlers/douyin/web/config.yaml
-            docker restart douyin_api
-            sleep 5
-          fi
-
-          # 探测 API 实际监听端口（同时尝试 8000 和 80）
-          API_PORT=""
-          for port in 8000 80; do
-            if curl -sf --max-time 3 http://localhost:${port}/docs > /dev/null 2>&1; then
-              API_PORT=$port
-              echo "✅ API 监听在端口 ${port}"
-              break
-            fi
-          done
-
-          # 若快速检测没命中，继续轮询（最多再等 60 秒）
-          if [ -z "$API_PORT" ]; then
-            for i in $(seq 1 30); do
-              for port in 8000 80; do
-                if curl -sf --max-time 3 http://localhost:${port}/docs > /dev/null 2>&1; then
-                  API_PORT=$port
-                  echo "✅ Douyin API 已就绪 port=${port} (第 ${i} 次检测)"
-                  break 2
-                fi
-              done
-              echo "等待 API 就绪... (${i}/30)"
-              sleep 2
-            done
-          fi
-
-          # 健康检查彻底失败时打印日志并终止
-          if [ -z "$API_PORT" ]; then
-            echo "❌ API 启动超时，容器日志如下："
-            docker logs douyin_api 2>&1
-            exit 1
-          fi
-
-          # 将实际端口写入 GITHUB_ENV，供后续步骤使用
-          echo "DOUYIN_API_PORT=${API_PORT}" >> $GITHUB_ENV
+          pip install requests playwright
+          playwright install --with-deps chromium
 
       - name: Run parser
         env:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
           SILICONFLOW_TIMEOUT: ${{ vars.SILICONFLOW_TIMEOUT || '180' }}
-          DOUYIN_API_BASE: "http://localhost:${{ env.DOUYIN_API_PORT }}"
+          DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
           SHARE_TEXT: "${{ github.event.issue.title }} ${{ github.event.issue.body }}"
         run: |
           echo "开始解析..."

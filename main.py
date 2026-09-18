@@ -7,21 +7,17 @@ import time
 import requests
 
 # ==================== 配置区域 ====================
-# 1. 解析接口：默认指向 douyin.wtf，可通过环境变量 DOUYIN_API_BASE 覆盖（如自建 Docker 实例）
-_api_base = os.environ.get("DOUYIN_API_BASE", "https://douyin.wtf").rstrip("/")
-DOUYIN_ONLINE_API = _api_base + "/api/hybrid/video_data"
-
-# 2. 硅基流动的 API Key、请求地址与超时设置
+# 1. 硅基流动的 API Key、请求地址与超时设置
 SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
 SILICONFLOW_ASR_URL = "https://api.siliconflow.cn/v1/audio/transcriptions"
 SILICONFLOW_LLM_URL = "https://api.siliconflow.cn/v1/chat/completions"
 # 读取超时时间（秒），应对长音视频和跨国网络延迟，默认 180 秒
 SILICONFLOW_TIMEOUT = int(os.environ.get("SILICONFLOW_TIMEOUT", "180"))
 
-# 3. 选择语音识别模型 (推荐阿里 SenseVoiceSmall，速度快且自带标点)
+# 2. 选择语音识别模型 (推荐阿里 SenseVoiceSmall，速度快且自带标点)
 ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
 
-# 4. 选择文案润色 LLM (Qwen/Qwen3-8B 为硅基流动永久免费、中文能力强)
+# 3. 选择文案润色 LLM (Qwen/Qwen3-8B 为硅基流动永久免费、中文能力强)
 LLM_MODEL = "Qwen/Qwen3-8B"
 # ==================================================
 
@@ -50,83 +46,115 @@ LLM_SYSTEM_PROMPT = """你是一名专业的语音文稿校对员。
 
 
 def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
-    """第一步：调用 /api/hybrid/video_data，提取优先音频或无水印视频地址
+    """第一步：使用 Playwright 无头浏览器加载分享页，拦截真实播放音视频流地址
 
     返回: (media_url, media_type) -> ("https://...", "mp3"|"mp4")
     """
-    if "douyin.wtf" in DOUYIN_ONLINE_API:
-        print("1. 正在调用 douyin.wtf 混合解析接口...")
-    else:
-        print(f"1. 正在调用自定义/本地解析接口 ({_api_base})...")
+    print("1. 正在通过无头浏览器加载页面并拦截媒体流...")
 
-    # 从分享文本中提取真正的 URL，防止多余的字符导致 API 400 错误
+    # 从分享文本中提取真正的 URL
     url_match = re.search(r'(https?://[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|])', share_text_or_url)
-    clean_url = url_match.group(1) if url_match else share_text_or_url
+    target_url = url_match.group(1) if url_match else share_text_or_url
+    print(f" -> 目标链接: {target_url}")
 
-    # 设置请求参数
-    params = {
-        "url": clean_url,
-        "minimal": "true",  # 开启精简模式，加快接口返回速度
-    }
+    from playwright.sync_api import sync_playwright
 
-    try:
-        response = requests.get(DOUYIN_ONLINE_API, params=params, timeout=60)
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"无法连接到解析服务接口 ({DOUYIN_ONLINE_API}): {e}")
+    captured_url = None
+    captured_type = "mp4"
 
-    if response.status_code != 200:
-        err_detail = ""
+    with sync_playwright() as p:
+        # 模拟移动端设备 (iPhone 14 / Safari / 微信环境兼容)，风控最宽松
+        iphone = p.devices.get("iPhone 14 Pro") or {
+            "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+            "viewport": {"width": 393, "height": 852},
+            "is_mobile": True,
+            "has_touch": True,
+        }
+
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ]
+        )
+        context = browser.new_context(**iphone)
+
+        # 若环境变量配置了 DOUYIN_COOKIE，自动注入以登录态访问
+        cookie_env = os.environ.get("DOUYIN_COOKIE", "").strip()
+        if cookie_env:
+            if cookie_env.lower().startswith("cookie:"):
+                cookie_env = cookie_env[7:].strip()
+            cookies_to_add = []
+            for item in cookie_env.split(";"):
+                item = item.strip()
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    if k:
+                        cookies_to_add.append({
+                            "name": k,
+                            "value": v,
+                            "domain": ".douyin.com",
+                            "path": "/",
+                        })
+            if cookies_to_add:
+                try:
+                    context.add_cookies(cookies_to_add)
+                    print(f" -> 已自动注入登录 Cookie (共 {len(cookies_to_add)} 个字段)")
+                except Exception as e:
+                    print(f" -> [Warn] Cookie 注入遇到微小异常，继续以游客模式尝试: {e}")
+
+        page = context.new_page()
+
+        # 监听所有网络响应，优先从请求流截获正在播放的音视频流 URL
+        def on_response(response):
+            nonlocal captured_url, captured_type
+            if captured_url:
+                return
+            u = response.url
+            content_type = response.headers.get("content-type", "")
+            # 匹配常见无水印音视频流特征
+            if "video/mp4" in content_type or "video/tos" in u or "aweme/v1/play" in u or "douyinvod.com" in u:
+                if not u.endswith(".jpg") and not u.endswith(".png"):
+                    captured_url = u
+                    captured_type = "mp4"
+                    print(" -> [拦截成功] 捕获到视频播放流！")
+
+        page.on("response", on_response)
+
         try:
-            err_json = response.json()
-            err_detail = err_json.get("detail") or err_json.get("message") or str(err_json)
-        except Exception:
-            err_detail = response.text[:300]
-        
-        hint = ""
-        if response.status_code == 400:
-            hint = "\n💡 提示：HTTP 400 通常表示该视频触发了抖音平台的反爬滑块验证码，或当前 DOUYIN_COOKIE 已失效/未生效。"
-        raise RuntimeError(f"解析接口返回 HTTP {response.status_code}: {err_detail}{hint}")
+            # 访问分享链接，等待 DOM 与网络响应
+            page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
 
-    try:
-        res_json = response.json()
+            # 轮询等待音视频数据流加载完成 (最多 8 秒)
+            for _ in range(16):
+                if captured_url:
+                    break
+                # 若尚未通过网络响应拦截到，尝试从 DOM 中的 video 标签提取
+                try:
+                    video_src = page.eval_on_selector("video", "el => el.src || el.currentSrc")
+                    if video_src and video_src.startswith("http"):
+                        captured_url = video_src
+                        captured_type = "mp4"
+                        print(" -> [DOM提取成功] 从 video 元素捕获到播放地址！")
+                        break
+                except Exception:
+                    pass
+                page.wait_for_timeout(500)
 
-        # 检查接口 HTTP 状态码与业务 code
-        if res_json.get("code") != 200:
-            raise RuntimeError(f"API 解析返回异常: {res_json}")
+        except Exception as e:
+            print(f" -> 页面加载提示: {e}")
+        finally:
+            browser.close()
 
-        data = res_json.get("data", {})
-        if not data:
-            raise ValueError("解析成功，但未能获取到有效的数据结构(data为空)。")
+    if not captured_url:
+        raise RuntimeError("未能从页面中截获到音视频流地址。该内容可能被设置了仅好友可见、已被删除或当前 IP 触发了强验证。")
 
-        # --- 策略：优先拿无水印视频流（保证包含口播人声+伴奏完整音轨），拿不到再降级尝试独立音频 ---
-        # 1. 优先尝试获取无水印视频流（包含完整口播录音）
-        video_url_list = (
-            data.get("video", {}).get("play_addr", {}).get("url_list", [])
-        )
-        if video_url_list and video_url_list[0]:
-            print(" -> 成功获取无水印视频流地址！(包含完整口播与原声)")
-            return video_url_list[0], "mp4"
-
-        # 2. 尝试获取无水印视频流 (新版 video_data 结构)
-        nwm_video_url = data.get("video_data", {}).get("nwm_video_url")
-        if nwm_video_url:
-            print(" -> 成功获取无水印视频流地址(新版结构)！(包含完整口播与原声)")
-            return nwm_video_url, "mp4"
-
-        # 3. 降级备用：尝试获取独立背景音乐/音频（仅适用于纯音频条目或未提取到视频的作品）
-        music_url_list = (
-            data.get("music", {}).get("play_url", {}).get("url_list", [])
-        )
-        if music_url_list and music_url_list[0]:
-            print(" -> [降级备用] 未获取到视频流，正在使用独立音频流...")
-            return music_url_list[0], "mp3"
-
-        print(" -> [Debug] 无法提取有效链接，API 原始返回数据如下：")
-        print(json.dumps(res_json, ensure_ascii=False, indent=2))
-        raise ValueError("无法从接口返回的数据中提取到有效的音频或视频下载链接。")
-
-    except ValueError as e:
-        raise e
+    return captured_url, captured_type
 
 
 def transcribe_via_siliconflow(media_url: str, media_type: str, max_retries: int = 3) -> str:
