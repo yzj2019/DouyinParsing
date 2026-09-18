@@ -19,15 +19,13 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: |
-          pip install requests playwright
-          playwright install --with-deps chromium
+        run: pip install requests
 
       - name: Run parser
         env:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
           SILICONFLOW_TIMEOUT: ${{ vars.SILICONFLOW_TIMEOUT || '180' }}
-          DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
+          DOUYIN_WTF_KEY: ${{ secrets.DOUYIN_WTF_KEY }}
           SHARE_TEXT: "${{ github.event.issue.title }} ${{ github.event.issue.body }}"
         run: |
           echo "开始解析..."

@@ -10,11 +10,11 @@
 
 ## ✨ 核心特性
 
-- **⚡ 动态截流解析**：基于无头浏览器与网络流量拦截机制，模拟移动端环境直接捕获原生音视频流，彻底摆脱传统爬虫 API 对反爬逆向的依赖，无惧平台接口变更。
+- **⚡ 官方 v5 极速解析**：底层直连 [Evil0ctal/Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API) v5 官方托管中继（`demo.douyin.wtf`），由算法集群全自动处理 `a_bogus` 签名与机房风控，1 秒获取无水印原片直链。
 - **🧠 智能识别 (ASR)**：接入硅基流动提供的 `FunAudioLLM/SenseVoiceSmall`，识别速度极快，自带标点支持，应对复杂口播毫无压力。
 - **📝 极致润色 (LLM)**：搭载 `Qwen/Qwen3-8B` 大模型，不仅能去除口语化废话（“呃”、“那个”、“对吧”），还能根据逻辑自动进行**合理的段落切分**。
 - **🌊 流式输出与重试容错**：大模型润色阶段全面采用 **SSE 流式输出**（Streaming）；ASR 与 LLM 全链路配置**弹性超时与指数退避自动重试**（默认 3 次），彻底告别长音频或跨国网络延迟带来的超时报错与单次中断。
-- **☁️ Serverless 体验**：支持通过 **GitHub Actions + Issues** 实现零服务器成本的在线云端调用。
+- **☁️ Serverless 极速体验**：纯 HTTP 轻量架构，彻底移除了沉重的 Chromium/Playwright 依赖，GitHub Actions 从启动到回复仅需 **15 秒**！
 
 ---
 
@@ -22,8 +22,8 @@
 
 ```mermaid
 graph TD
-    A[抖音分享文本/链接] --> B(GitHub Actions 云端无头浏览器)
-    B -->|动态截获正在播放的音视频流| C(流媒体内存拉取)
+    A[抖音分享文本/链接] --> B(demo.douyin.wtf 官方 v5 API)
+    B -->|1秒返回无水印视频直链| C(流媒体内存拉取)
     C -->|纯内存操作，不落盘| D{SenseVoiceSmall ASR<br/>自动重试 + 弹性超时}
     D -->|口语化粗糙文案| E(Qwen3-8B 润色提取<br/>流式输出 + 容错重试)
     E -->|流式输出| F[✨ 结构化书面文案]
@@ -35,7 +35,7 @@ graph TD
 
 ### 方式一：GitHub Issues 云端调用 (推荐 🌟)
 
-你可以把这个项目当成一个**免费的聊天机器人**，直接在 GitHub Issues 里提交链接，机器人会自动回复文案结果！不仅无需配置本地环境，还不占用任何本地资源。
+你可以把这个项目当成一个**免费的聊天机器人**，直接在 GitHub Issues 里提交链接，机器人会自动回复文案结果！无需配置本地环境，也不占用任何本地资源。
 
 1. **Fork 本仓库** 到你的 GitHub 账号下。
 2. **开启前置开关（仅需配置一次，GitHub 默认对 Fork 仓库关闭以下功能）**：
@@ -43,23 +43,19 @@ graph TD
    - **启用 GitHub Actions**：点击仓库顶部的 **Actions** 标签页 -> 点击绿色的 **"I understand my workflows, go ahead and enable them"** 启用工作流。
    - **授予 Actions 写入权限**：进入 **Settings** -> 左侧菜单点击 **Actions** -> **General** -> 页面滚动到底部 **Workflow permissions** -> 选择 **Read and write permissions** 并点击 **Save**（确保机器人有权限在 Issue 下发表回复）。
 3. 在仓库的 `Settings -> Secrets and variables -> Actions` 中，点击 `New repository secret`，添加 `SILICONFLOW_API_KEY`，值为你的硅基流动 API Key。
-   - *(可选)* 添加 `SILICONFLOW_TIMEOUT`（默认为 `180` 秒），针对超长音频或海外网络可配置为 `240` 或 `300`。
-4. **(可选) 注入抖音 Cookie**（默认无需配置，开箱即用）：
-   - 本项目默认以高仿移动端 Safari/微信环境运行，游客身份即可直接拦截大部分公开视频流。
-   - 若遇到部分作品提示验证，或为了更强的防风控稳定性，可添加名为 `DOUYIN_COOKIE` 的 Secret。
-   - 获取方式：电脑浏览器打开 [抖音网页版](https://www.douyin.com)，按 `F12` 开启开发者工具，在 `Network` 请求头中复制 `Cookie` 内容粘贴至 Secret。
-5. 在仓库顶部导航栏点击 **Issues**，创建一个 **New issue**。
-6. 将抖音分享文本/链接写在 Issue 标题或正文，点击 **Submit new issue**。
-7. 喝口水 ☕，十几秒后，GitHub Actions Bot 就会把排版精美的文案回复在评论区！
+   - *(可选)* 添加 `SILICONFLOW_TIMEOUT`（默认为 `180` 秒）。
+   - *(可选)* 添加 `DOUYIN_WTF_KEY`（若不填写，项目默认使用官方演示公开 Key，开箱即用）。
+4. 在仓库顶部导航栏点击 **Issues**，创建一个 **New issue**。
+5. 将抖音分享文本/链接写在 Issue 标题或正文，点击 **Submit new issue**。
+6. 喝口水 ☕，十几秒后，GitHub Actions Bot 就会把排版精美的文案回复在评论区！
 
 ### 方式二：本地调用
 
 如果你希望进行二次开发或本地测试，只需安装 Python 3.10+ 及依赖即可快速运行体验：
 
 ```bash
-# 1. 安装依赖与浏览器内核
-pip install requests playwright
-playwright install chromium
+# 1. 安装依赖
+pip install requests
 
 # 2. 将硅基流动的 API Key 配置进环境变量 SILICONFLOW_API_KEY
 # Windows PowerShell:

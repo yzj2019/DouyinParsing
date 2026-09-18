@@ -45,130 +45,97 @@ LLM_SYSTEM_PROMPT = """你是一名专业的语音文稿校对员。
 原文有多少信息，输出就有多少信息，一句都不能少。"""
 
 
+# 默认公共凭证 (来自 demo.douyin.wtf 官方公开演示 Key)
+DEFAULT_DOUYIN_WTF_KEY = "dtk_df6373c8dd2f_b39OkgSfqI2BN8HP-jPxo3k5bvkyxvrg"
+
+
 def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
-    """第一步：使用 Playwright 无头浏览器加载分享页，拦截真实播放音视频流地址
+    """第一步：提取短链并通过 demo.douyin.wtf (v5 API) 极速解析无水印音视频流地址
 
     返回: (media_url, media_type) -> ("https://...", "mp3"|"mp4")
     """
-    print("1. 正在通过无头浏览器加载页面并拦截媒体流...")
+    print("1. 正在解析抖音分享链接并提取媒体直链...")
 
-    # 从分享文本中提取真正的 URL
+    # 从分享文本中提取 URL
     url_match = re.search(r'(https?://[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|])', share_text_or_url)
-    target_url = url_match.group(1) if url_match else share_text_or_url
-    print(f" -> 目标链接: {target_url}")
+    raw_url = url_match.group(1) if url_match else share_text_or_url
+    print(f" -> 原始链接: {raw_url}")
 
-    from playwright.sync_api import sync_playwright
+    # 展开短链，提取包含真实作品 ID 的重定向目标
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
+    }
+    try:
+        redirect_res = requests.get(raw_url, headers=headers, allow_redirects=False, timeout=10)
+        target_url = redirect_res.headers.get("Location") or redirect_res.url
+    except Exception as e:
+        print(f" -> [Warn] 短链重定向探测轻微异常: {e}，直接使用原始链接")
+        target_url = raw_url
 
-    captured_url = None
-    captured_type = "mp4"
+    print(f" -> 重定向地址: {target_url}")
 
-    with sync_playwright() as p:
-        # 模拟移动端设备 (iPhone 14 / Safari / 微信环境兼容)，风控最宽松
-        iphone = p.devices.get("iPhone 14 Pro") or {
-            "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
-            "viewport": {"width": 393, "height": 852},
-            "is_mobile": True,
-            "has_touch": True,
-        }
+    # 提取作品 ID (aweme_id)
+    id_match = re.search(r'/(?:video|note)/(\d+)', target_url)
+    if not id_match:
+        # 兼容纯数字串
+        id_match = re.search(r'(\d{18,20})', target_url)
 
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-            ]
-        )
-        context = browser.new_context(**iphone)
+    aweme_id = id_match.group(1) if id_match else None
+    if not aweme_id:
+        raise ValueError(f"未能从链接中解析出有效的抖音作品 ID (aweme_id)，链接为: {target_url}")
 
-        # 若环境变量配置了 DOUYIN_COOKIE，自动注入以登录态访问
-        cookie_env = os.environ.get("DOUYIN_COOKIE", "").strip()
-        if cookie_env:
-            if cookie_env.lower().startswith("cookie:"):
-                cookie_env = cookie_env[7:].strip()
-            cookies_to_add = []
-            for item in cookie_env.split(";"):
-                item = item.strip()
-                if "=" in item:
-                    k, v = item.split("=", 1)
-                    k = k.strip()
-                    v = v.strip()
-                    if k:
-                        cookies_to_add.append({
-                            "name": k,
-                            "value": v,
-                            "domain": ".douyin.com",
-                            "path": "/",
-                        })
-            if cookies_to_add:
-                try:
-                    context.add_cookies(cookies_to_add)
-                    print(f" -> 已自动注入登录 Cookie (共 {len(cookies_to_add)} 个字段)")
-                except Exception as e:
-                    print(f" -> [Warn] Cookie 注入遇到微小异常，继续以游客模式尝试: {e}")
+    print(f" -> 解析到作品 ID (aweme_id): {aweme_id}")
 
-        page = context.new_page()
+    # 调用 demo.douyin.wtf v5 API
+    api_key = os.environ.get("DOUYIN_WTF_KEY", "").strip() or DEFAULT_DOUYIN_WTF_KEY
+    api_url = "https://demo.douyin.wtf/api/v1/douyin/video"
+    api_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    }
+    params = {
+        "aweme_id": aweme_id,
+        "wait": 30,  # 同步阻塞等待任务完成
+    }
 
-        # 监听所有网络响应，优先从请求流截获正在播放的音视频流 URL
-        def on_response(response):
-            nonlocal captured_url, captured_type
-            if captured_url:
-                return
-            u = response.url
-            content_type = response.headers.get("content-type", "")
-            # 匹配常见无水印音视频流特征
-            if "video/mp4" in content_type or "video/tos" in u or "aweme/v1/play" in u or "douyinvod.com" in u:
-                if not u.endswith(".jpg") and not u.endswith(".png"):
-                    captured_url = u
-                    captured_type = "mp4"
-                    print(" -> [拦截成功] 捕获到视频播放流！")
+    try:
+        response = requests.get(api_url, headers=api_headers, params=params, timeout=40)
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"请求解析服务失败 ({api_url}): {e}")
 
-        page.on("response", on_response)
+    if response.status_code != 200:
+        raise RuntimeError(f"解析服务返回 HTTP {response.status_code}: {response.text[:300]}")
 
-        try:
-            # 访问分享链接，等待 DOM 与网络响应
-            page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+    res_json = response.json()
+    if not res_json.get("success"):
+        err = res_json.get("error", {})
+        raise RuntimeError(f"解析服务业务异常: {err.get('message', str(err))}")
 
-            # 轮询等待音视频数据流加载完成 (最多 8 秒)
-            for _ in range(16):
-                if captured_url:
-                    break
-                # 若尚未通过网络响应拦截到，尝试从 DOM 中的 video 标签提取
-                try:
-                    video_src = page.eval_on_selector("video", "el => el.src || el.currentSrc")
-                    if video_src and video_src.startswith("http"):
-                        captured_url = video_src
-                        captured_type = "mp4"
-                        print(" -> [DOM提取成功] 从 video 元素捕获到播放地址！")
-                        break
-                except Exception:
-                    pass
-                page.wait_for_timeout(500)
+    data = res_json.get("data", {})
+    media = data.get("media", {})
 
-        except Exception as e:
-            print(f" -> 页面加载提示: {e}")
-        finally:
-            browser.close()
+    video_url = media.get("video", {}).get("url")
+    if video_url:
+        print(" -> [解析成功] 成功获取无水印视频流！")
+        return video_url, "mp4"
 
-    if not captured_url:
-        raise RuntimeError("未能从页面中截获到音视频流地址。该内容可能被设置了仅好友可见、已被删除或当前 IP 触发了强验证。")
+    audio_url = media.get("audio", {}).get("url")
+    if audio_url:
+        print(" -> [解析成功] 成功获取纯音频流！")
+        return audio_url, "mp3"
 
-    return captured_url, captured_type
+    raise ValueError(f"解析成功但未在响应中找到有效的音视频流地址: {res_json}")
 
 
 def transcribe_via_siliconflow(media_url: str, media_type: str, max_retries: int = 3) -> str:
     """第二与第三步：在内存中拉取流媒体，并直接发给硅基流动进行 ASR 识别（带自动重试与超时保护）"""
     print("2. 正在拉取音视频流数据（纯内存操作，不写入硬盘）...")
 
-    cookie = os.environ.get("DOUYIN_COOKIE", "")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://www.douyin.com/",
         "Accept": "*/*",
     }
-    if cookie:
-        headers["Cookie"] = cookie
 
     media_response = requests.get(
         media_url, headers=headers, stream=True, timeout=(10, 60)
