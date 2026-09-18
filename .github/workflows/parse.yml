@@ -39,37 +39,45 @@ jobs:
             && echo "已取得默认配置文件" \
             || echo "⚠️  未找到 config.yaml，跳过 Cookie 注入"
 
-          # 将 DOUYIN_COOKIE 注入配置（正则替换 Cookie 行，保留文件原有结构和注释）
+          # 将 DOUYIN_COOKIE 安全清洗并注入配置（使用 PyYAML 规范解析，杜绝语法损坏）
           if [ -f ./config.yaml ] && [ -n "$DOUYIN_COOKIE" ]; then
             python3 - <<'PYEOF'
-          import re, os
+          import os, re, yaml
 
-          cookie = os.environ.get("DOUYIN_COOKIE", "")
+          raw_cookie = os.environ.get("DOUYIN_COOKIE", "").strip()
           path = "./config.yaml"
 
+          # 1. 自动清洗 Cookie 常见脏数据（协议头前缀、换行符、外层多余引号）
+          clean_cookie = raw_cookie
+          if clean_cookie.lower().startswith("cookie:"):
+              clean_cookie = clean_cookie[7:].strip()
+          # 去除换行符并规整为单行标准 Cookie
+          clean_cookie = re.sub(r'[\r\n]+', ' ', clean_cookie).strip()
+          # 去除首尾可能多复制的双引号或单引号
+          if (clean_cookie.startswith('"') and clean_cookie.endswith('"')) or (clean_cookie.startswith("'") and clean_cookie.endswith("'")):
+              clean_cookie = clean_cookie[1:-1].strip()
+
           with open(path, "r", encoding="utf-8") as f:
-              content = f.read()
+              config = yaml.safe_load(f) or {}
 
-          # 仅替换 Cookie 行的值，保留缩进和其他所有内容
-          new_content, n = re.subn(
-              r'([ \t]+Cookie:[ \t]).*',
-              lambda m: m.group(1) + cookie,
-              content
+          # 2. 结构化赋值
+          headers = (
+              config.setdefault("TokenManager", {})
+                    .setdefault("douyin", {})
+                    .setdefault("headers", {})
           )
+          headers["Cookie"] = clean_cookie
 
-          if n == 0:
-              # 原文件没有 Cookie 行，追加到 headers 下
-              new_content = re.sub(
-                  r'([ \t]+Referer:[ \t].+)',
-                  r'\1\n      Cookie: ' + cookie,
-                  content
-              )
-              print("✅ Cookie 行不存在，已追加到 Referer 后")
-          else:
-              print(f"✅ Cookie 已注入（长度: {len(cookie)} 字符）")
-
+          # 3. 规范写回 YAML
           with open(path, "w", encoding="utf-8") as f:
-              f.write(new_content)
+              yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
+
+          # 4. 语法复测自检
+          with open(path, "r", encoding="utf-8") as f:
+              test_cfg = yaml.safe_load(f)
+              assert test_cfg["TokenManager"]["douyin"]["headers"]["Cookie"] == clean_cookie
+
+          print(f"✅ Cookie 安全清洗并注入成功（有效长度: {len(clean_cookie)} 字符，YAML 语法合法）")
           PYEOF
             # 将修改后的配置写回容器并重启
             docker cp ./config.yaml douyin_api:/app/crawlers/douyin/web/config.yaml

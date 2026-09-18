@@ -71,17 +71,21 @@ def get_douyin_media_url(share_text_or_url: str) -> tuple[str, str]:
 
     try:
         response = requests.get(DOUYIN_ONLINE_API, params=params, timeout=60)
-        response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        if "douyin.wtf" not in DOUYIN_ONLINE_API:
-            print(f" -> [Warn] 本地/自定义接口请求失败 ({e})，正在自动切换至 douyin.wtf 官方接口重试...")
-            try:
-                response = requests.get("https://douyin.wtf/api/hybrid/video_data", params=params, timeout=60)
-                response.raise_for_status()
-            except requests.exceptions.RequestException as e2:
-                raise RuntimeError(f"网络请求失败，本地和官方 API 均无法连接: {e2}")
-        else:
-            raise RuntimeError(f"网络请求失败，无法连接到 douyin.wtf API: {e}")
+        raise RuntimeError(f"无法连接到解析服务接口 ({DOUYIN_ONLINE_API}): {e}")
+
+    if response.status_code != 200:
+        err_detail = ""
+        try:
+            err_json = response.json()
+            err_detail = err_json.get("detail") or err_json.get("message") or str(err_json)
+        except Exception:
+            err_detail = response.text[:300]
+        
+        hint = ""
+        if response.status_code == 400:
+            hint = "\n💡 提示：HTTP 400 通常表示该视频触发了抖音平台的反爬滑块验证码，或当前 DOUYIN_COOKIE 已失效/未生效。"
+        raise RuntimeError(f"解析接口返回 HTTP {response.status_code}: {err_detail}{hint}")
 
     try:
         res_json = response.json()
