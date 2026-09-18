@@ -29,7 +29,7 @@ jobs:
           docker run -d \
             --name douyin_api \
             --network host \
-            evil0ctal/douyin_tiktok_download_api:latest
+            evil0ctal/douyin_tiktok_download_api:V4.1.2
 
           # 等待容器初始化
           sleep 10
